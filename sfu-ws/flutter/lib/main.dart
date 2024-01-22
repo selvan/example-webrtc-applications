@@ -3,9 +3,11 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+
 import 'package:flutter/material.dart';
-import 'package:websocket/websocket.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() => runApp(MyApp());
 
@@ -19,8 +21,9 @@ class _GetMyAppState extends State<MyApp> {
   final _localRenderer = RTCVideoRenderer();
   List _remoteRenderers = [];
 
-  WebSocket _socket;
-  RTCPeerConnection _peerConnection;
+  late WebSocketChannel _wsChannel;
+
+  late RTCPeerConnection _peerConnection;
 
   @override
   void initState() {
@@ -41,14 +44,10 @@ class _GetMyAppState extends State<MyApp> {
     });
 
     _peerConnection.onIceCandidate = (candidate) {
-      if (candidate == null) {
-        return;
-      }
-
-      _socket.add(JsonEncoder().convert({
+      _wsChannel.sink.add(JsonEncoder().convert({
         "event": "candidate",
         "data": JsonEncoder().convert({
-          'sdpMLineIndex': candidate.sdpMlineIndex,
+          'sdpMLineIndex': candidate.sdpMLineIndex,
           'sdpMid': candidate.sdpMid,
           'candidate': candidate.candidate,
         })
@@ -57,11 +56,13 @@ class _GetMyAppState extends State<MyApp> {
 
     _peerConnection.onTrack = (event) async {
       if (event.track.kind == 'video' && event.streams.isNotEmpty) {
-	var renderer = RTCVideoRenderer();
-	await renderer.initialize();
-	renderer.srcObject = event.streams[0];
+        var renderer = RTCVideoRenderer();
+        await renderer.initialize();
+        renderer.srcObject = event.streams[0];
 
-	setState(() { _remoteRenderers.add(renderer); });
+        setState(() {
+          _remoteRenderers.add(renderer);
+        });
       }
     };
 
@@ -72,14 +73,16 @@ class _GetMyAppState extends State<MyApp> {
       // Filter existing renderers for the stream that has been stopped
       _remoteRenderers.forEach((r) {
         if (r.srcObject.id == stream.id) {
-		rendererToRemove = r;
-	} else {
-	  newRenderList.add(r);
-	}
+          rendererToRemove = r;
+        } else {
+          newRenderList.add(r);
+        }
       });
 
       // Set the new renderer list
-      setState(() { _remoteRenderers = newRenderList; });
+      setState(() {
+        _remoteRenderers = newRenderList;
+      });
 
       // Dispose the renderer we are done with
       if (rendererToRemove != null) {
@@ -87,15 +90,19 @@ class _GetMyAppState extends State<MyApp> {
       }
     };
 
-    _socket = await WebSocket.connect('ws://localhost:8080/websocket');
-    _socket.stream.listen((raw) async {
+    _wsChannel =
+        IOWebSocketChannel.connect("ws://localhost:8080/websocket");
+    await _wsChannel.ready;
+
+    _wsChannel.stream.listen((raw) async {
+
       Map<String, dynamic> msg = jsonDecode(raw);
 
       switch (msg['event']) {
         case 'candidate':
           Map<String, dynamic> parsed = jsonDecode(msg['data']);
           _peerConnection
-              .addCandidate(RTCIceCandidate(parsed['candidate'], null, 0));
+              .addCandidate(RTCIceCandidate(parsed['candidate'], parsed['sdpMid'], parsed['sdpMLineIndex']));
           return;
         case 'offer':
           Map<String, dynamic> offer = jsonDecode(msg['data']);
@@ -103,11 +110,12 @@ class _GetMyAppState extends State<MyApp> {
           // SetRemoteDescription and create answer
           await _peerConnection.setRemoteDescription(
               RTCSessionDescription(offer['sdp'], offer['type']));
-          RTCSessionDescription answer = await _peerConnection.createAnswer({});
+          RTCSessionDescription answer =
+              await _peerConnection.createAnswer({});
           await _peerConnection.setLocalDescription(answer);
 
           // Send answer over WebSocket
-          _socket.add(JsonEncoder().convert({
+          _wsChannel.sink.add(JsonEncoder().convert({
             'event': 'answer',
             'data':
                 JsonEncoder().convert({'type': answer.type, 'sdp': answer.sdp})

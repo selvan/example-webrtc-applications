@@ -47,7 +47,7 @@ Add the following entry to your Android Manifest file, located in `./android/app
 </application>
 ```
 
-Edit`android/app/build.gradle`, modify minSdkVersion to 18
+Edit`android/app/build.gradle`, modify minSdkVersion to 21
 
 ```gradle
     defaultConfig {
