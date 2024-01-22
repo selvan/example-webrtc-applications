@@ -22,8 +22,33 @@
   </body>
 
   <script>
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    let fps = 60;
+    let out_video_width = 1920;
+    let out_video_height = 1080;
+
+    let localVideoDOM = document.getElementById("localVideo");
+    localVideoDOM.width = out_video_width;
+    localVideoDOM.height = out_video_height;
+
+    let canvasDOM = document.createElement('canvas');
+    canvasDOM.width = out_video_width;
+    canvasDOM.height = out_video_height;
+
+    let canvasContext = canvasDOM.getContext('2d')
+
+    let canvasStream = canvasDOM.captureStream(fps);
+
+    (function loop() {
+      canvasContext.drawImage(localVideoDOM, 0, 0, localVideoDOM.width, localVideoDOM.height);
+      requestAnimationFrame(loop)
+    })();
+
+    navigator.mediaDevices.getUserMedia({ video: {
+        width: { ideal: out_video_width },
+        height: { ideal: out_video_height },
+      }, audio: true })
     .then(stream => {
+
       let pc = new RTCPeerConnection()
       pc.ontrack = function (event) {
         if (event.track.kind === 'audio') {
@@ -48,7 +73,16 @@
       }
 
       document.getElementById('localVideo').srcObject = stream
-      stream.getTracks().forEach(track => pc.addTrack(track, stream))
+      stream.getTracks().forEach((track) => {
+        if(track.kind === 'video') {
+          console.log("Added video track");
+          // get video track from the canvas, instead of user media
+          pc.addTrack(canvasStream.getVideoTracks()[0], stream);
+        } else {
+          // audio track
+          pc.addTrack(track, stream);
+        }        
+      });
 
       let ws = new WebSocket("{{.}}")
       pc.onicecandidate = e => {
@@ -98,3 +132,4 @@
     }).catch(window.alert)
   </script>
 </html>
+
